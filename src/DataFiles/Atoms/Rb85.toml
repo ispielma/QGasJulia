@@ -1,0 +1,12 @@
+m = 85 # mass in AMU
+a_s = -433 # background statteriing length in units of a_0 # Even this might want to be put into a structure like below in the future
+i = 2.5 # 5/2
+
+T_Melt = 312.3
+T_Boil = 961
+
+Vapor_A_Solid = 7.861 # 0.123 + 2.881 + 4.857
+Vapor_A_Liquid = 7.316 # 0.123 + 2.881 + 4.312
+
+Vapor_B_Solid = 4215
+Vapor_B_Liquid = 4040

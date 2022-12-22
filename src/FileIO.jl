@@ -4,14 +4,16 @@ import HDF5
 import Formatting
 
 struct DataFiles
-    filename::String # Beginning of filename 
+    prefix::String # Beginning of filename 
     initialindex::Integer # First index 
     finalindex::Integer # Last index
-end
+    extension::String # End of filename (like h5 or txt)
+end 
+DataFiles(prefix::String, initialindex::Integer, finalindex::Integer; extension::String=".h5") = DataFiles(prefix, initialindex, finalindex, extension)
 
 struct ImageGroup
     orientation::String # Orientation label for saved image.
-    label::String # Label of saved image.
+    label::String # Label of saved image (ignore if empty)
     images::Vector{String} # Identifiers of saved images.
 end
 
@@ -23,7 +25,7 @@ FileNameArray : this function returns an array of files that should be evaulated
     formatstring: a python style format string directing how to format the index
         "0>4d" will make strings like 0111 or 0001
 """
-function FileNameArray(files::Vector{DataFiles}; extension::String=".h5", formatstring::String="d")
+function FileNameArray(files::Vector{DataFiles}; formatstring::String="d")
 
 
     # Now build the tuple of file names
@@ -38,7 +40,7 @@ function FileNameArray(files::Vector{DataFiles}; extension::String=".h5", format
         end
         
         # And here is the list for this element of files.  
-        newfiles = [Formatting.format(indexformat, file.filename, i, extension) for i in file.initialindex:file.finalindex]
+        newfiles = [Formatting.format(indexformat, file.prefix, i, file.extension) for i in file.initialindex:file.finalindex]
         append!(filelist, newfiles)
     end
     
@@ -62,17 +64,27 @@ Returns:
     2-D image array.
 """
 function getimage(h5_file::HDF5.File, orientation::String, label::String, image::String)
-    if ~haskey(h5_file, "images")
+
+    h5path = "images"
+    if ~haskey(h5_file, h5path)
         throw( KeyError("File does not contain any images") )
-    elseif ~haskey(h5_file["images"], orientation)
+    end
+
+    if ~haskey(h5_file[h5path], orientation)
         throw( KeyError("File does not contain any images with orientation $(orientation)") )
-    elseif ~haskey(h5_file["images"][orientation], label)
+    end
+    h5path = h5path*"/"*orientation
+
+    if ~haskey(h5_file[h5path], label) # no label is OK
         throw( GenericException("File does not contain any images with label $(label)") )
-    elseif ~haskey(h5_file["images"][orientation][label], image)
+    end
+    h5path = h5path*"/"*label
+
+    if ~haskey(h5_file[h5path], image)
         throw( GenericException("Image $(image) not found in file") )
     end
 
-    return HDF5.read(h5_file["images"][orientation][label][image]) 
+    return HDF5.read(h5_file[h5path][image]) 
 end
 function getimage(filename::String, orientation::String, label::String, image::String)
     (image) = HDF5.h5open(filename, "r") do h5_file
@@ -94,10 +106,16 @@ Returns:
     Dict of 2-D image arrays.
 """
 function getimages(h5_file::HDF5.File, imagegroups::Vector{ImageGroup})
-    imagedict = Dict{String, Dict}()
+    local imagedict = Dict{String, Dict}()
     for imagegroup in imagegroups
-        imagedict[imagegroup.orientation] = Dict{String, Dict}()
-        imagedict[imagegroup.orientation][imagegroup.label] = Dict{String, Any}()
+        if ~(imagegroup.orientation in keys(imagedict))
+            imagedict[imagegroup.orientation] = Dict{String, Dict}()
+        end
+
+        if ~(imagegroup.label in keys(imagedict[imagegroup.orientation]))
+            imagedict[imagegroup.orientation][imagegroup.label] = Dict{String, Any}()
+        end
+
         for image in imagegroup.images
             imagedict[imagegroup.orientation][imagegroup.label][image] = getimage(h5_file, imagegroup.orientation, imagegroup.label, image)
         end

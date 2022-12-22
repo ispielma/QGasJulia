@@ -1,0 +1,61 @@
+m = 86.909180520 # mass in AMU
+i = 1.5 # 3/2
+
+g_S = 2.0023193043622
+g_L = 0.99999369
+g_I = -0.0009951414
+
+a_s = 100 # background statteriing length in units of a_0 # Even this might want to be put into a structure like below in the future
+c_6 = 4698
+
+T_Melt = 312.3 
+T_Boil = 961
+
+Vapor_A_Solid = 7.861 # 0.123 + 2.881 + 4.857
+Vapor_A_Liquid = 7.316 # 0.123 + 2.881 + 4.312
+
+Vapor_B_Solid = 4215
+Vapor_B_Liquid = 4040
+
+# States
+[states]
+    [states."5s_1/2"]
+        A = 3.417341305452145e9
+        g_J = 2.00233113
+
+        l = 0.0
+        s = 0.5 # 1/2
+        j = 0.5 # 1/2
+
+    [states."5p_1/2"]
+        A = 407.24e6
+
+        g_J = 0.666
+
+        l = 1.0
+        s = 0.5 # 1/2
+        j = 0.5 # 1/2
+
+
+    [states."5p_3/2"]
+        A = 84.7185e6
+        B = 12.4965e6
+
+        g_J = 1.3362
+
+        l = 1.0
+        s = 0.5 # 1/2
+        j = 1.5 # 3/2
+
+# Transitions for which we have data
+[transitions]
+
+    [transitions."5p_1/2->5s_1/2"]
+        name = "D1"
+        "τ" = 27.679e-9
+        "λ" = 794.9788509e-9
+
+    [transitions."5p_3/2->5s_1/2"]
+        name = "D2"
+        "τ" = 26.2348e-9
+        "λ" = 780.241209686e-9

@@ -1,0 +1,39 @@
+# Lithium 6
+# B. Marcelis et al., PRB 70 012701 (2004)
+# Le Luo, Ph.D. Thesis, Duke (2009)
+# PHYSICAL REVIEW A 75, 052508 (2007)
+
+
+m = 6.0151214 # mass in AMU
+a_s = -2000 # background statteriing length in units of a_0 # Even this might want to be put into a structure like below in the future
+i = 1.0 # 3/2
+
+# States
+[states]
+    [states."2s_1/2"]
+        l = 0.0
+        s = 0.5 # 1/2
+        j = 0.4 # 1/2
+
+    [states."2p_1/2"]
+        l = 1.0
+        s = 0.5 # 1/2
+        j = 0.5 # 1/2
+
+    [states."2p_3/2"]
+        l = 1.0
+        s = 0.5 # 1/2
+        j = 1.5 # 3/2
+
+# Transitions for which we have data
+[transitions]
+
+    [transitions."2p_1/2->2s_1/2"]
+        name = "D1"
+        "τ" = 27.012e-9
+        "λ" = 670.9924761296535e-9
+
+    [transitions."2p_3/2->2s_1/2"]
+        name = "D2"
+        "τ" = 27.012e-9
+        "λ" = 670.977378787114e-9

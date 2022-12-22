@@ -1,0 +1,38 @@
+# Lithium 7: Refs
+# https://arxiv.org/pdf/1404.2623.pdf
+# PHYSICAL REVIEW A 75, 052508 2007
+
+m = 7.0160040 # mass in AMU
+a_s = -27 # background statteriing length in units of a_0 # Even this might want to be put into a structure like below in the future
+i = 1.5 # 3/2
+
+# States
+[states]
+    [states."2s_1/2"]
+        l = 0.0
+        s = 0.5 # 1/2
+        j = 0.4 # 1/2
+
+    [states."2p_1/2"]
+        l = 1.0
+        s = 0.5 # 1/2
+        j = 0.5 # 1/2
+
+    [states."2p_3/2"]
+        l = 1.0
+        s = 0.5 # 1/2
+        j = 1.5 # 3/2
+
+# Transitions for which we have data
+[transitions]
+
+    [transitions."2p_1/2->2s_1/2"]
+        name = "D1"
+        "τ" = 27.012e-9
+        "λ" = 670.9766549e-9
+
+    [transitions."2p_3/2->2s_1/2"]
+        name = "D2"
+        "τ" = 27.012e-9
+        "λ" = 670.9615598e-9
+
