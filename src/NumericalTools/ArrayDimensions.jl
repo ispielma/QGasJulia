@@ -33,7 +33,7 @@ index i, return the (x,y,z,...) coordinates associated with it and the reverse.
 module ArrayDimensions
 
     # Import the functions that I plan to extend
-    import Base: ndims, size, length, copy, reshape, getindex, setindex!, show
+    import Base: ndims, size, length, copy, reshape, getindex, setindex!, show, +, *, /, ^
     import Base: CartesianIndices, LinearIndices
 
     """
@@ -408,14 +408,21 @@ module ArrayDimensions
     """
     struct NDRange{dim} <: AbstractArray{Any, dim}
         ranges::Tuple{Vararg{<:AbstractVector, dim}}
+        function NDRange(ranges)
+            len = length(ranges)
+            if len == 0
+                len = 1
+                ranges = tuple([])
+            end
+            new{len}(ranges)
+        end
     end
-    NDRange(ranges...) = NDRange(ranges)
-
-    function size(ndrange::NDRange)
-        Tuple(length(x) for x in ndrange.ranges)
-    end
+    NDRange(ranges...) = NDRange{length(ranges)}(ranges)
+    NDRange() = NDRange([]) # default setup for no range
 
     # Overload methods needed for AbstractArray
+
+    size(ndrange::NDRange) = Tuple(length(x) for x in ndrange.ranges)
 
     size(ndrange::NDRange, d) = d::Integer <= length(ndrange.ranges) ? length(ndrange.ranges[d]) : 1
 
@@ -426,7 +433,7 @@ module ArrayDimensions
     end
     function getindex(ndrange::NDRange, i1::Union{Integer, Base.CartesianIndex}, I::Union{Integer, Base.CartesianIndex}...)
         indices = Base.to_indices(ndrange, (i1, I...))
-        return [x[i] for (x,i) in zip(ndrange.ranges, indices)]
+        return Tuple(x[i] for (x,i) in zip(ndrange.ranges, indices))
     end
 
     length(ndrange::NDRange) = prod(size(ndrange))
@@ -434,5 +441,23 @@ module ArrayDimensions
     ndims(ndrange::NDRange{dim}) where dim = dim::Integer
 
     show(io::IO, ndrange::NDRange) = print(io, ndrange.ranges)
+
+    +(ndrange::NDRange, x::Number) = NDRange(Tuple(y + x for y in ndrange.ranges))
+    +(x::Number, ndrange::NDRange) = +(ndrange::NDRange, y)
+
+    *(ndrange::NDRange, x::Number) = NDRange(Tuple(y * x for y in ndrange.ranges))
+    *(x::Number, ndrange::NDRange) = *(ndrange::NDRange, y)
+
+    /(ndrange::NDRange, x::Number) = NDRange(Tuple(y / x for y in ndrange.ranges))
+    /(x::Number, ndrange::NDRange) = NDRange(Tuple(x / y for y in ndrange.ranges))
+
+    """
+    Returns an tuple with length ndims(NDRange) filled with the contents of the range
+
+    The Julia forums claimed that using iterators made meshgrid un-needed, but my experience was that the 
+    performance suffered 100x fold.
+    """
+    meshgrid(ndrange::NDRange) =  Tuple([x[j[i]] for j in CartesianIndices(ndrange)] for (i, x) in enumerate(ndrange.ranges) )
+
 
 end # ArrayDimensions

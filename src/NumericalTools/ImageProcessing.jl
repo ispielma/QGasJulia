@@ -13,6 +13,16 @@ module ImageProcessing
 
     import QGas.NumericalTools.ArrayDimensions as AD
 
+    #=
+     ######  ######## ########  ##     ##  ######  ########  ######
+    ##    ##    ##    ##     ## ##     ## ##    ##    ##    ##    ##
+    ##          ##    ##     ## ##     ## ##          ##    ##
+     ######     ##    ########  ##     ## ##          ##     ######
+          ##    ##    ##   ##   ##     ## ##          ##          ##
+    ##    ##    ##    ##    ##  ##     ## ##    ##    ##    ##    ##
+     ######     ##    ##     ##  #######   ######     ##     ######
+    =#
+
     """
     ImageInfo
     
@@ -39,7 +49,8 @@ module ImageProcessing
         ndrange = AD.NDRange(ranges)
 
         # Future option for more filter choices
-        filter = FFTW.fftshift([exp( -0.5.*sum( (xy./filter_width).^2 )) for xy in ndrange]) # Build filter here
+        filter = gauss_window(ndrange, filter_width)
+        filter = FFTW.fftshift(filter / sum(filter))
         
         return ImageInfo{dim}(npnts, dxs, units, filter_width, gauss_window, filter, ranges, ndrange)
     end
@@ -55,6 +66,33 @@ module ImageProcessing
         return ImageInfo(npnts, dxs; gauss_width=gauss_width)
     end
 
+    #=
+       ##      ## #### ##    ## ########   #######  ##      ##  ######
+       ##  ##  ##  ##  ###   ## ##     ## ##     ## ##  ##  ## ##    ##
+       ##  ##  ##  ##  ####  ## ##     ## ##     ## ##  ##  ## ##
+       ##  ##  ##  ##  ## ## ## ##     ## ##     ## ##  ##  ##  ######
+       ##  ##  ##  ##  ##  #### ##     ## ##     ## ##  ##  ##       ##
+       ##  ##  ##  ##  ##   ### ##     ## ##     ## ##  ##  ## ##    ##
+        ###  ###  #### ##    ## ########   #######   ###  ###   ######
+    =#
+
+    # Here I have a series of distributions and windows.  The key distinction between the 
+    # two functions are that windows have a peak value of 1 (i.e. inside the window), while
+    # distributions are normalized to 1
+
+    # Plan: for each item the "base" function will be the distribution as it will be the most
+    # simple to express, and the normed version will be a different function that calls that 
+    # and then appends the norm.
+    # I will be careful to minimize the number of times the norm is computed in the case of vector
+    # operations (i.e don't comput it inside the scalar method if it is called from the vector method)
+
+    """
+        shift_window(f, min, max)
+
+    shifts a function that has a domain [0,1] to be in the domain [min,max]
+    """
+    shift_window(f, min, max) = (max-min).*f .+ min
+
     """
         tukey_window(f, a)
 
@@ -64,71 +102,70 @@ module ImageProcessing
 
     a : tukey window parameter with 0 being a box window and 1 being a cos window
 
-    scale : x axis scale factor.  I use this for radial tukeys that make a window starting 
-        at zero and naturally ending at 1.  In this case one would set scale = 0.5
-
-        min : y minimum of the window (usually 0.0)
-
-        max : y maximum of the window (usually 1.0)
+    w : x axis width.  I use this for radial tukeys that make a window starting 
+        at zero and naturally ending at 1.  In this case one would set width = 2
 
     """
-    function tukey_window(f::Number, a; scale=1.0, min=0.0, max=1.0)
-        g = abs(f*scale)
-        if g > 0.5
+    function tukey_window(f::Number, a)
+        f = abs(f)
+        if f > 0.5
             window = 0
-        elseif g < 0.5*(1 - a) 
+        elseif f < 0.5*(1 - a) 
             window = 1
         else
-            window = ( 1-cos(pi*(1-2*g)/a) ) / 2
+            window = ( 1-cos(pi*(1-2*f)/a) ) / 2
         end
-    
-        # Now scale to fit in the mix / max range
-        window = (max-min)*window + min
 
         return window
-    end
-    function tukey_window(f::AbstractArray, a; scale=1.0, min=0.0, max=1.0)
+    end 
+
+    tukey_window(f, a, w) = tukey_window(f./w, a)
+    tukey_window(f, a, w, cen) = tukey_window(f-cen, w, a)
     
-        window = similar(f, Float64) 
-    
-        for i in CartesianIndices(f)
-            window[i] = tukey_window(f[i], a; scale=scale, min=min, max=max)
-        end
-    
-        return window
-    end
+    # Multi dimension methods
+    tukey_window(fs::Tuple{Vararg{T, dim}}, a) where {T, dim} = tukey_window(sqrt(sum(fs.^2)), a)
+    tukey_window(fs::Tuple{Vararg{T, dim}}, a, w::Number) where {T, dim} = tukey_window(fs ./ w, a)
+    tukey_window(fs::Tuple{Vararg{T, dim}}, a, ws) where {T, dim} = tukey_window(Tuple( f / w for (f, w) in zip(fs, ws)), a)
+    tukey_window(fs::Tuple{Vararg{T, dim}}, a, ws, cens) where {T, dim} = tukey_window(Tuple( f - c for (f, c) in zip(fs, cens)), a, ws)
+
+    # version for many points
+    tukey_window(f::AbstractArray, args...) = [tukey_window(f[i], args...) for i in CartesianIndices(f) ]
+
 
     """
         gauss_window(w, a)
 
     f : defines the quantity on which the window is evaluated.
 
-    σ : gaussian width
-
-    min : y minimum of the window (usually 0.0)
-
-    max : y maximum of the window (usually 1.0)
+    w : gaussian width
 
     """
-    function gauss_window(f::Number, σ; min=0.0, max=1.0)
 
-        window = exp( -0.5*sum( (f/σ)^2 ))
-    
-        # Now scale to fit in the mix / max range
-        window = (max-min)*window + min
+    gauss_window(f::Number) = exp(-0.5*f^2 )
 
-        return window
-    end
-    function gauss_window(f::AbstractArray, σ; min=0.0, max=1.0)
+    gauss_window(f, w) = gauss_window(f./w)
+    gauss_window(f, w, cen) = gauss_window(f-cen, w)
     
-        window = similar(f, Float64) 
+    # Multi dimension methods
+    gauss_window(fs::Tuple{Vararg{T, dim}}) where {T, dim} = gauss_window(sqrt(sum(fs.^2)))
+    gauss_window(fs::Tuple{Vararg{T, dim}}, w::Number) where {T, dim} = gauss_window(fs ./ w)
+    gauss_window(fs::Tuple{Vararg{T, dim}}, ws) where {T, dim} = gauss_window(Tuple( f / w for (f, w) in zip(fs, ws)))
+    gauss_window(fs::Tuple{Vararg{T, dim}}, ws, cens) where {T, dim} = gauss_window(Tuple( f - c for (f, c) in zip(fs, cens)), ws)
+
+    # version for many points
+    gauss_window(f::AbstractArray, args...) = [gauss_window(f[i], args...) for i in CartesianIndices(f) ]
+
+
     
-        for i in CartesianIndices(f)
-            window[i] = gauss_window(f[i], σ; min=min, max=max)
-        end
-    
-        return window
-    end
+    #=
+       ########  #######   #######  ##        ######
+          ##    ##     ## ##     ## ##       ##    ##
+          ##    ##     ## ##     ## ##       ##
+          ##    ##     ## ##     ## ##        ######
+          ##    ##     ## ##     ## ##             ##
+          ##    ##     ## ##     ## ##       ##    ##
+          ##     #######   #######  ########  ######
+    =#
 
     """
         conv_with_weights(data, w, f)
@@ -154,6 +191,26 @@ module ImageProcessing
 
         return ans
     end
+
+    function PSD(Field; shift=false)
+        psd = abs.(FFTW.rfft(Field)).^2
+    
+        if shift
+            psd = FFTW.fftshift(psd)
+        end
+    
+        return psd
+    end
+
+    #=
+        ######   #######  ##       ########        ###    ########  #######  ##     ##  ######
+       ##    ## ##     ## ##       ##     ##      ## ##      ##    ##     ## ###   ### ##    ##
+       ##       ##     ## ##       ##     ##     ##   ##     ##    ##     ## #### #### ##
+       ##       ##     ## ##       ##     ##    ##     ##    ##    ##     ## ## ### ##  ######
+       ##       ##     ## ##       ##     ##    #########    ##    ##     ## ##     ##       ##
+       ##    ## ##     ## ##       ##     ##    ##     ##    ##    ##     ## ##     ## ##    ##
+        ######   #######  ######## ########     ##     ##    ##     #######  ##     ##  ######
+    =#
 
     """
     preprocess_probe(probe, dark, filter)
@@ -184,6 +241,8 @@ module ImageProcessing
 
         return probe
     end
+    filter_probe(probe, imginfo::ImageInfo) = filter_probe(probe, imginfo.filter)
+
 
     preprocess_probe(probe, dark, filter::AbstractArray) = filter_probe(preprocess_probe(probe, dark), filter)
     preprocess_probe(probe, dark, imginfo::ImageInfo) = preprocess_probe(probe, dark, imginfo.filter)
