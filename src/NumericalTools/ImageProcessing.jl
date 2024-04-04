@@ -155,7 +155,47 @@ module ImageProcessing
     # version for many points
     gauss_window(f::AbstractArray, args...) = [gauss_window(f[i], args...) for i in CartesianIndices(f) ]
 
+    """
+    MaskConfig
 
+    A struct with a constructor that creates one of the known mask/window types
+    """
+    struct WindowConfig
+        type::String
+        radius::Vector{Float64}
+        center::Vector{Float64}
+        power::Float64
+        tukey_parameter::Float64
+        window::Array{Float64}
+    end
+    function WindowConfig(grids, type, radius, center, power, tukey_parameter, invert)
+        dims = size(grids[1])
+        
+        # Define a scaled radial array
+        grd2 = zeros(dims)
+        for (grd, c, r) in zip(grids, center, radius)
+            grd2 .+= (abs.(grd .- c)./r).^power
+        end
+    
+        # Now convert this to a mask
+        # Use whatever window function you want here, but for standard windows    
+        if type=="Tukey"
+            grd2 = grd2.^(1/power)
+            window = tukey_window(grd2, tukey_parameter, 2)
+        elseif type=="SuperGauss"
+            window = exp.(-grd2.^tukey_parameter)
+        elseif type=="Gauss" # gauss
+            window = exp.(-0.5.*grd2)
+        else
+            window = ones(dims)
+        end
+    
+        if invert
+            window = 1 .- window
+        end
+        
+        return WindowConfig(type, radius, center, power, tukey_parameter, window)
+    end
     
     #=
        ########  #######   #######  ##        ######
@@ -266,7 +306,7 @@ module ImageProcessing
     average_dark(darks::AbstractArray) = average_dark(convert(Array{Float64}, darks))
 
     """
-        α(I, I_bar, ΔI2)
+    α_realization(I, I_bar, ΔI2)
 
     Generates a single realization of a field consistant with:
 
