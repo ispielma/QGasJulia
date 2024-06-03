@@ -3,6 +3,60 @@ module FileIO
 import HDF5
 import Format
 
+#=
+ ######   ######## ##    ## ######## ########     ###    ##
+##    ##  ##       ###   ## ##       ##     ##   ## ##   ##
+##        ##       ####  ## ##       ##     ##  ##   ##  ##
+##   #### ######   ## ## ## ######   ########  ##     ## ##
+##    ##  ##       ##  #### ##       ##   ##   ######### ##
+##    ##  ##       ##   ### ##       ##    ##  ##     ## ##
+ ######   ######## ##    ## ######## ##     ## ##     ## ########
+=#
+
+"""
+dict_to_h5
+
+recursivly iterates through d and saves contents into the h5 reference
+"""
+function dict_to_h5(h5ref::HDF5.H5DataStore, d::Dict{String, Any})
+    for (key, item) in d
+
+        # Clear out old data
+        if key in keys(h5ref)
+            HDF5.delete_object(h5ref, key)
+        end
+
+        # recurse if needed
+        if typeof(item) == Dict{String, Any}
+            HDF5.create_group(key)
+
+            dict_to_h5(h5ref::HDF5.H5DataStore, item)
+        else
+            HDF5.write_dataset(h5ref, key, item)
+        end
+        
+    end
+end
+dict_to_h5(filename::AbstractString, d::Dict{String, Any}) = HDF5.h5open( f -> dict_to_h5(f, d), filename, "r+")
+
+"""
+h5_to_dict
+
+Returns a dictionary containg the data from the h5 file
+"""
+h5_to_dict(filename) = HDF5.h5open(h5_to_dict, filename, "r")
+h5_to_dict(h5ref::HDF5.H5DataStore) = read(h5ref)
+
+#=
+##          ###    ########   ######   ######  ########  #### ########  ########
+##         ## ##   ##     ## ##    ## ##    ## ##     ##  ##  ##     ##    ##
+##        ##   ##  ##     ## ##       ##       ##     ##  ##  ##     ##    ##
+##       ##     ## ########   ######  ##       ########   ##  ########     ##
+##       ######### ##     ##       ## ##       ##   ##    ##  ##           ##
+##       ##     ## ##     ## ##    ## ##    ## ##    ##   ##  ##           ##
+######## ##     ## ########   ######   ######  ##     ## #### ##           ##
+=#
+
 struct LabscriptConfig
     experiment_shot_storage::String
     output_folder_format::String
