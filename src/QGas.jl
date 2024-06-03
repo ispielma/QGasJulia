@@ -1,10 +1,13 @@
 module QGas
     export FileIO
     export AtomicPhysics    
+    export AtomicConstants 
     export NumericalTools    
     export Simulation    
 
     include("AtomicPhysics.jl")
+
+    include("AtomicConstants.jl")
 
     include("FileIO.jl")
 

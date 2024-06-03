@@ -10,8 +10,10 @@ module ImageProcessing
     import FFTW
     import Distributions as Dist
     import Statistics as Stat
+    import LazyGrids
+    import PaddedViews
 
-    import QGas.NumericalTools.ArrayDimensions as AD
+
 
     #=
      ######  ######## ########  ##     ##  ######  ########  ######
@@ -24,48 +26,56 @@ module ImageProcessing
     =#
 
     """
-    ImageInfo
+        ImageInfo
     
-    contains the basic information requed to interpert cold atom images
+    contains the most basic information requed to interpert cold atom images
     """ 
-    
     _filter_width = 1.0 # a default width
     struct ImageInfo{dim}
         npnts::Tuple{Vararg{Int64, dim}}
         dxs::Tuple{Vararg{Float64, dim}}
+        dks::Tuple{Vararg{Float64, dim}}
         units::Tuple{Vararg{String, dim}}
-        filter_width::Float64 # width of gaussian for data filtering
-        filter_function::Function # Function to use for filtering
-        filter::Array{Float64, dim} # filter for use in low-pass for recovery of bad data
-        ranges::Tuple{Vararg{AbstractVector, dim}} # Intended to be 1D ranges
-        ndrange::AD.NDRange{dim} # Mesh-grid like object
+        index_ranges::Tuple{Vararg{AbstractVector, dim}} # Array of 1D ranges  (to access array elements)
+        ranges::Tuple{Vararg{AbstractVector, dim}} # Array of 1D ranges in real units
+        ndrange::Tuple{Vararg{LazyGrids.AbstractGrid, dim}}  # Mesh-grid like object hm... several types possible here... GridSL vs GridUR
+        k_ranges::Tuple{Vararg{AbstractVector, dim}} # Array of 1D ranges in real units
+        k_ndrange::Tuple{Vararg{LazyGrids.AbstractGrid, dim}}  # Mesh-grid like object hm... several types possible here... GridSL vs GridUR
     end 
     function ImageInfo(
             npnts::Tuple{Vararg{Int64, dim}}, 
             dxs::Tuple{Vararg{Float64, dim}}, 
-            units::Tuple{Vararg{String, dim}}; 
-            filter_width=_filter_width) where dim
-        ranges = Tuple(range(-dx*npnt/2, dx*npnt/2, length=npnt) for (dx, npnt) in zip(dxs, npnts))
-        ndrange = AD.NDRange(ranges)
+            units::Tuple{Vararg{String, dim}}) where dim
 
-        # Future option for more filter choices
-        filter = gauss_window(ndrange, filter_width)
-        filter = FFTW.fftshift(filter / sum(filter))
+        dks = (2 * π) ./ (npnts .* dxs) 
+
+        index_ranges = Tuple(1:npnt for npnt in npnts)
+        # Because I always want 0,0 to be in the range I do need to distinguish odd versus even.
+        ranges = Tuple(_range_with_zero(npnt, dx) for (dx, npnt) in zip(dxs, npnts)) 
+        ndrange = LazyGrids.ndgrid(ranges...)
         
-        return ImageInfo{dim}(npnts, dxs, units, filter_width, gauss_window, filter, ranges, ndrange)
+        k_ranges = Tuple(FFTW.fftfreq(n,  (2 * π) / dx) for (n, dx) in zip(npnts, dxs) )
+        k_ndrange = LazyGrids.ndgrid(k_ranges...)
+
+        # return ndrange
+        return ImageInfo{dim}(npnts, dxs, dks, units, index_ranges, ranges, ndrange, k_ranges, k_ndrange)
     end
     function ImageInfo(
             npnts::Tuple{Vararg{Int64, dim}},
-            dxs::Tuple{Vararg{Float64, dim}}; 
-            filter_width=_filter_width) where dim
+            dxs::Tuple{Vararg{Float64, dim}}) where dim
         units = Tuple("" for i in 1:dim)
-        return ImageInfo(npnts, dxs, units); filter_width=filter_width
+        return ImageInfo(npnts, dxs, units)
     end
-    function ImageInfo(npnts::Tuple{Vararg{Int64, dim}}; filter_width=_filter_width) where dim
-        dsx = Tuple(1.0 for i in 1:dim)
-        return ImageInfo(npnts, dxs; gauss_width=gauss_width)
+    function ImageInfo(npnts::Tuple{Vararg{Int64, dim}}) where dim
+        dxs = Tuple(1.0 for i in 1:dim)
+        return ImageInfo(npnts, dxs)
     end
 
+    """
+    A helper function that returns a range that always includes zero.  Note that I need to do an even / odd check
+    """
+    _range_with_zero(npnt::Integer, dx) = (npnt % 2 == 0 ? range(-dx*(npnt)/2, dx*(npnt-2)/2, length=npnt) : range(-dx*(npnt-1)/2, dx*(npnt-1)/2, length=npnt) )
+    
     #=
        ##      ## #### ##    ## ########   #######  ##      ##  ######
        ##  ##  ##  ##  ###   ## ##     ## ##     ## ##  ##  ## ##    ##
@@ -106,21 +116,21 @@ module ImageProcessing
         at zero and naturally ending at 1.  In this case one would set width = 2
 
     """
-    function tukey_window(f::Number, a)
+    function tukey_window(f, a)
         f = abs(f)
         if f > 0.5
-            window = 0
+            window = 0.0
         elseif f < 0.5*(1 - a) 
-            window = 1
+            window = 1.0
         else
-            window = ( 1-cos(pi*(1-2*f)/a) ) / 2
+            window = ( 1-cos(pi*(1-2*f)/a) ) / 2.0
         end
 
         return window
     end 
 
-    tukey_window(f, a, w) = tukey_window(f./w, a)
-    tukey_window(f, a, w, cen) = tukey_window(f-cen, w, a)
+    tukey_window(f, a, w) = tukey_window.(f./w, a)
+    tukey_window(f, a, w, cen) = tukey_window(f .- cen, a, w)
     
     # Multi dimension methods
     tukey_window(fs::Tuple{Vararg{T, dim}}, a) where {T, dim} = tukey_window(sqrt(sum(fs.^2)), a)
@@ -159,6 +169,9 @@ module ImageProcessing
     MaskConfig
 
     A struct with a constructor that creates one of the known mask/window types
+
+    shift (bool): if we apply fftshift to the window (useful if it will be applied after
+        a FFT)
     """
     struct WindowConfig
         type::String
@@ -168,7 +181,7 @@ module ImageProcessing
         tukey_parameter::Float64
         window::Array{Float64}
     end
-    function WindowConfig(grids, type, radius, center, power, tukey_parameter, invert)
+    function WindowConfig(grids, type, radius, center, power, tukey_parameter, invert; shift=false)
         dims = size(grids[1])
         
         # Define a scaled radial array
@@ -176,7 +189,7 @@ module ImageProcessing
         for (grd, c, r) in zip(grids, center, radius)
             grd2 .+= (abs.(grd .- c)./r).^power
         end
-    
+
         # Now convert this to a mask
         # Use whatever window function you want here, but for standard windows    
         if type=="Tukey"
@@ -194,6 +207,10 @@ module ImageProcessing
             window = 1 .- window
         end
         
+        if shift
+            window = FFTW.fftshift(window)
+        end
+
         return WindowConfig(type, radius, center, power, tukey_parameter, window)
     end
     
@@ -281,38 +298,71 @@ module ImageProcessing
 
         return probe
     end
-    filter_probe(probe, imginfo::ImageInfo) = filter_probe(probe, imginfo.filter)
-
 
     preprocess_probe(probe, dark, filter::AbstractArray) = filter_probe(preprocess_probe(probe, dark), filter)
-    preprocess_probe(probe, dark, imginfo::ImageInfo) = preprocess_probe(probe, dark, imginfo.filter)
 
     """
         average_dark(darks)
 
     return the average of the dark frames as well as the average noise
     """
-    function average_dark(darks::Array{Float64})
-        mean = Stat.mean(darks; dims=1)
-        std = Stat.std(darks; mean=mean, dims=1)
+    function average_dark(darks::Array{Float64}; remove=[])
+        dim = ndims(darks)
+        mean = Stat.mean(darks; dims=dim)
+        std = Stat.std(darks; mean=mean, dims=dim)
 
         # For some reason mean and std do not reduce the dimension of the array and have
-        # a 1 sized dimension on the first index
-        reshape(mean, size(mean)[2:end] )
-        reshape(std, size(std)[2:end] )
+        # a 1 sized dimension on the last index
+        mean = reshape(mean, size(mean)[1:(end-1)] )
+        std =  reshape(std, size(std)[1:(end-1)] )
 
-        return mean[1,:,:],  std[1,:,:]
+        for image in remove
+            image .-= mean
+        end
+
+        return mean, std
     end
     average_dark(darks::AbstractArray) = average_dark(convert(Array{Float64}, darks))
 
+    r"""
+        probe_basis(probes)
+
+    construct a PCA/SVD basis from a set of probe images.  
+
+    Currently always does SVD in the way that assumes that the number of probe images is small
+    as compared to the number of pixels $N$ in each images.  For the opposite approach one would
+    make the covariance matrix be $N\times N$.
+    """
+    function probe_basis(probes::Array{Float64})
+        probes_flat = reshape(probes, :, size(probes)[end])
+
+        factor = LA.svd(probes_flat);
+
+        # Get eigenvalues
+        pvs = factor.S .^2
+        pvs ./= sum(pvs)
+
+        return reshape(factor.U, size(probes)[1:end-1]..., :), pvs
+    end
+    probe_basis(probes::AbstractArray) = probe_basis(convert(Array{Float64}, probes))
+
+#=
+             #######  ######## ##     ## ######## ########     ########  #######  ##    ##  ######
+            ##     ##    ##    ##     ## ##       ##     ##       ##    ##     ##  ##  ##  ##    ##
+            ##     ##    ##    ##     ## ##       ##     ##       ##    ##     ##   ####   ##
+            ##     ##    ##    ######### ######   ########        ##    ##     ##    ##     ######
+            ##     ##    ##    ##     ## ##       ##   ##         ##    ##     ##    ##          ##
+            ##     ##    ##    ##     ## ##       ##    ##        ##    ##     ##    ##    ##    ##
+             #######     ##    ##     ## ######## ##     ##       ##     #######     ##     ######
+=#
     """
     α_realization(I, I_bar, ΔI2)
 
     Generates a single realization of a field consistant with:
 
-    I   The observed field
-    I_bar   The known mean field
-    ΔI2     The pixel-by-pixel variance variance
+    I   The observed intensity
+    I_bar   The known mean intensity
+    ΔI2     The pixel-by-pixel variance
 
     """
     function α_realization(I, I_bar, ΔI2; addnoise=false)
