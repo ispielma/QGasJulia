@@ -28,16 +28,16 @@ function dict_to_h5(h5ref::HDF5.H5DataStore, d::Dict{String, Any})
 
         # recurse if needed
         if typeof(item) == Dict{String, Any}
-            HDF5.create_group(key)
+            HDF5.create_group(h5ref, key)
 
-            dict_to_h5(h5ref::HDF5.H5DataStore, item)
+            dict_to_h5(h5ref[key], item)
         else
             HDF5.write_dataset(h5ref, key, item)
         end
         
     end
 end
-dict_to_h5(filename::AbstractString, d::Dict{String, Any}) = HDF5.h5open( f -> dict_to_h5(f, d), filename, "r+")
+dict_to_h5(filename::AbstractString, d::Dict{String, Any}) = HDF5.h5open( f -> dict_to_h5(f, d), filename, "cw")
 
 """
 h5_to_dict
