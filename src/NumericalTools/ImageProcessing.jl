@@ -225,6 +225,54 @@ module ImageProcessing
     =#
 
     """
+    downsample_array 
+
+    Downsamples an array by a specified factor, will average elements
+
+    This is implemented with CartesianIndices math, and there may be a better way to do this
+    """
+    function downsample_array(arr, factor::Int64)
+
+        if factor == 1 # No change needed of scale is 1
+            return arr
+        elseif factor < 1
+            error("scale factor must be positive")
+        end
+
+        array_size = size(arr)
+
+        # Check to see if the desired downsampling is possible
+        divisable = array_size .% factor
+        if any(divisable .!= 0)
+            error("array size is not divisable by downsample")
+        end
+        down_size = div.(array_size, factor)
+
+        # Downsample
+        arr_down = zeros(eltype(arr), down_size)
+        indices = CartesianIndices(arr_down)
+
+        I_index = oneunit(indices[1])
+        O_index = I_index .* 0
+        step_index = I_index .* (factor - 1)
+
+        for i in indices
+            s = zero(eltype(arr_down))
+            n = 0
+            for j in O_index:step_index
+                loop_index = j .+ i.*factor .- I_index .* (factor-1) # nasty looking because of zero indexing
+
+                s += arr[loop_index]
+                n += 1
+            end
+
+            arr_down[i] = s / n
+        end
+
+        return arr_down
+    end
+
+    """
         conv_with_weights(data, w, f)
     
     computes the convilution of a dataset with a function including the weight factors w.  The norm of data will be 
@@ -247,6 +295,40 @@ module ImageProcessing
         ans ./= FFTW.irfft( FFTW.rfft(w.^2) .* f_fft, d)
 
         return ans
+    end
+
+    """
+    I think that "bad" is equal to 1 where the data is good!
+    """
+    function fix_bad!(data, bad, filter; pad=true)
+
+        initial_size = size(data)
+    
+        if pad
+            pad_data = PaddedViews.PaddedView(0, data, initial_size .* 2)
+            pad_bad = PaddedViews.PaddedView(0, bad, initial_size .* 2)
+    
+            # This one needs padded in such a way that FFTshift will work
+            pad_filter = PaddedViews.PaddedView(
+                0,
+                filter.window,
+                initial_size .* 2,
+                initial_size .÷ 2 .+ 1
+            )
+        else
+            pad_data = data
+            pad_bad = bad
+            pad_filter = filter
+        end
+    
+        smooth = conv_with_weights(pad_data, pad_bad, FFTW.fftshift(pad_filter))
+    
+        if pad
+            smooth = smooth[1:initial_size[1], 1:initial_size[2]]
+        end
+    
+        # got the desired smoothed array!
+        data .= data .* bad + smooth .* (1 .- bad)
     end
 
     function PSD(Field; shift=false)
